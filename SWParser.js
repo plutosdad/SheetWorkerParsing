@@ -1134,8 +1134,8 @@ var SWUtils = SWUtils || (function() {
 		getAttrs([readField,writeField], function (values){ 
 			var o = {};
 			var value = 0;
-			var currVal= parseInt(values[writeField],10)||0;
-			value = parseInt(values[readField]);//cannot do "||0" since 0 is valid but falsy
+			var currVal= parseFloat(values[writeField],10)||0;
+			value = parseFloat(values[readField]);//cannot do "||0" since 0 is valid but falsy
 			if (isNaN(value) || typeof(value) === "undefined") {
 				SWUtils.evaluateExpression(values[readField],function(value){
 					//should be same, but sometimes not!? check both
