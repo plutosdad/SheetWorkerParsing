@@ -984,8 +984,23 @@ var ExExp = (function(){
 
 var SWUtils = SWUtils || (function() {	
 	
+	//no macro calls, dropdowns, or keep  highest/lowest more than 1
+	//currently support floor, abs, kh1, kl1 , also extended: ceil, round, max, min
+	var validNumericStr = function(preeval) {
+		var anyillegal=preeval.match(/\||\?|&|\{|\}|k[h,l][^1]/);
+		if (!(anyillegal==undefined) && anyillegal.length>0) {
+			return false;
+		}
+		
+		var r2=preeval.replace(/floor|ceil|round|abs|max|min|kh1|kl1/g,'');
+		anyillegal = r2.match(/[a-zA-Z]/);
+		if (!(anyillegal==undefined) && anyillegal.length>0) {
+			return false;
+		}
+		return true;
+	},
 	
-	/* evaluateFields
+	/* searchAndReplaceFields
 	 * Examines a string for instances of @{fieldname}, and then searches the sheet for those values 
 	 * then replaces the intances in the string with the values of those fields.
 	 * Because it is a search and replace, if there are no @{fieldname} values, then it will return the same string back.
@@ -993,11 +1008,12 @@ var SWUtils = SWUtils || (function() {
 	 *
 	 * @fromfield = string containing one or more @{fieldname}
 	 * @callback = method accepting 1 parameter , this parameter will be the result of the search and replace in the fromfield.
-	 * @evalToNumber = true if the end result should be evaluable to a number (not a macro string that is sent to chat)
+	 * @evalToNumber = true if call validNumericStr 
+	 * the end result should be evaluable to a number (not a macro string that is sent to chat)
 	 *   e.g.: replaces  [[ and ]] with ( and ) , ensures only kl1 or kh1 (not kh2 or more etc),
-	 *         no strings except valid functions like floor, ceil, etc, according to validStr
+	 *         no strings except valid functions like floor, ceil, etc, according to validNumericStr
 	 */
-	var evaluateFields = function(fromfield, callback, evalToNumber) {
+	searchAndReplaceFields = function(fromfield, evalToNumber, callback ) {
 		if (typeof callback !== "function") {
 			return;
 		}
@@ -1033,7 +1049,7 @@ var SWUtils = SWUtils || (function() {
 					}
 					if (evalToNumber) {
 						evalstr=evalstr.replace(/\s+/g,'').replace(/\[\[/g,"(").replace(/\]\]/g,")");
-						if (! validStr(evalstr) ) {
+						if (! validNumericStr(evalstr) ) {
 							evalstr="";
 							console.log("ERROR: cannot evaluate this to number: " + fromfield);
 						}
@@ -1051,44 +1067,6 @@ var SWUtils = SWUtils || (function() {
 		} 
 	},
 
-	//no macro calls, dropdowns, or keep  highest/lowest more than 1
-	//currently support floor, abs, kh1, kl1 , also extended: ceil, round, max, min
-	validStr = function(preeval) {
-		var anyillegal=preeval.match(/\||\?|&|\{|\}|k[h,l][^1]/);
-		if (!(anyillegal==undefined) && anyillegal.length>0) {
-			return false;
-		}
-		
-		var r2=preeval.replace(/floor|ceil|round|abs|max|min|kh1|kl1/g,'');
-		anyillegal = r2.match(/[a-zA-Z]/);
-		if (!(anyillegal==undefined) && anyillegal.length>0) {
-			return false;
-		}
-		return true;
-	},
-
-	/* evaluateAndSet
-	 * Searches the readField for any instances of @{field} and replaces them with a value
-	 * then writes the resulting string to the writeField. 
-	 * 
-	 * @readField = the field that contains the string to evaluate, like a field containing a macro
-	 * @writeField = the field to write the evaluated value of readField to
-	*/
-	evaluateAndSet = function (readField,writeField,evalToNumber) {
-		if (typeof writeField === "undefined" || writeField == null || 
-			typeof readField === "undefined" || readField == null) {
-			return;
-		}
-		getAttrs([readField],function(values) {
-			evaluateFields(values[readField], function(valueOf) {
-				if (typeof valueOf != "undefined" && valueOf != null && valueOf.length > 0) {
-					var setter = {};
-					setter[writeField]=valueOf;
-					setAttrs(setter);
-				}
-			},evalToNumber);
-		});
-	},
 	/* evaluateExpression
 	*  reads in the string, evalutates it until we find a number, then passes that numbe to the callback.
 	*  @exprStr= A string containing a mathematical expression, possibly containing references to fields such as @{myfield}
@@ -1099,9 +1077,9 @@ var SWUtils = SWUtils || (function() {
 			return;
 		}
 		if (! exprStr) {
-			callback("");;
+			callback("");
 		}
-		evaluateFields(exprStr, function(replacedStr) {
+		searchAndReplaceFields(exprStr, true, function(replacedStr) {
 			//console.log("we received "+replacedStr+" back");
 			var evaluated, setter={};
 			if (typeof replacedStr != "undefined" && replacedStr != null ) {
@@ -1110,17 +1088,81 @@ var SWUtils = SWUtils || (function() {
 			} else {
 				callback("");
 			}
-		},true);	
+		});	
+	},
+
+
+	/* evaluateAndSet
+	 * Searches the readField for any instances of @{field} and replaces them with a value
+	 * then writes the resulting string to the writeField. 
+	 * 
+	 * @readField = the field that contains the string to evaluate, like a field containing a macro
+	 * @writeField = the field to write the evaluated value of readField to
+	*/
+	evaluateAndSetString = function (readField,writeField,evalToNumber) {
+		if (typeof writeField === "undefined" || writeField == null || 
+			typeof readField === "undefined" || readField == null) {
+			return;
+		}
+		getAttrs([readField], evalToNumber,function(values) {
+			searchAndReplaceFields(values[readField], function(valueOf) {
+				if (typeof valueOf != "undefined" && valueOf != null && valueOf.length > 0) {
+					var setter = {};
+					setter[writeField]=valueOf;
+					setAttrs(setter);
+				}
+			});
+		});
+	},
+	
+
+
+	/* evaluateToNumberAndSet
+	* Examines the string in readField, and tests to see if it is a number
+	* if it's a number immediately write it to writeField.
+	* if not, then replace any @{field} references with numbers, and then evaluate it 
+	* as a mathematical expression till we find a number.
+	*
+	* note this is NOT recursive, you can't point one field of 
+    *
+	* @readField = field to read containing string to parse
+	* @writeField = field to write to
+	* @defaultVal= optional, default to set if we cannot evaluate the field. If none set to 0.
+	* 
+	*/
+	evaluateAndSetNumber = function(readField,writeField,defaultVal){
+		getAttrs([readField,writeField], function (values){ 
+			var o = {};
+			var value = 0;
+			var currVal= parseInt(values[writeField],10)||0;
+			value = parseInt(values[readField]);//cannot do "||0" since 0 is valid but falsy
+			if (isNaN(value) || typeof(value) === "undefined") {
+				SWUtils.evaluateExpression(values[readField],function(value){
+					//should be same, but sometimes not!? check both
+					if ( isNaN(value) || typeof(value) === "undefined" ) {value=defaultVal||0;}
+					if (currVal!==value) {
+						o[writeField]=value;
+						setAttrs(o);					
+					}
+				});
+			} else {
+				if (currVal!==value) {
+					o[writeField]=value;
+					setAttrs(o);
+				}				
+			}
+		});		
 	};
 
-
+	
+	
     return {
-		validStr:validStr,
-		evaluateFields:evaluateFields,
+		validNumericStr:validNumericStr,
+		searchAndReplaceFields:searchAndReplaceFields,
 		evaluateExpression:evaluateExpression,
-		evaluateAndSet:evaluateAndSet
+		evaluateAndSetString:evaluateAndSetString,
+		evaluateAndSetNumber:evaluateAndSetNumber
     };
 }());
-	
 	
 	
