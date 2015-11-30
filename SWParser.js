@@ -822,7 +822,7 @@ var ExExp = (function(){
             switch (t.type) {
             case "number":
             case "rollspec":
-                retval = t.value | 0;
+                retval = t.value || 0;
                 break;
             case "tablename":
                 retval = "[" + t.value + "]";
@@ -1045,7 +1045,9 @@ var SWUtils = SWUtils || (function() {
 						replacements[i]=values[fieldnames[i]];
 					}
 					for (i=0;i<numfields;i++){
-						evalstr = evalstr.replace(matches[i],replacements[i]);
+                        //easier than escaping special regex and double escaping $
+						evalstr = evalstr.split(matches[i]).join(replacements[i]);
+
 					}
 					if (evalToNumber) {
 						evalstr=evalstr.replace(/\s+/g,'').replace(/\[\[/g,"(").replace(/\]\]/g,")");
