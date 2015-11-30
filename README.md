@@ -1,6 +1,6 @@
 # SheetWorkerParsing
 Parsing and search and replace for Roll 20 SheetWorkers.
-This has functions to take "macro" field in a character sheet, lookup any references, then evaluate the macro and possibly set the value to a another field on a sheet.
+This has functions to take a "macro" textfield in a character sheet, lookup any references, then evaluate the macro and possibly set the value to another field on a sheet.
 I edited the Extended Expressions API script by Manveti (link below)
 
 #Known Issues
