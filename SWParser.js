@@ -1,4 +1,3 @@
-
 var ExExp = (function(){
 
     parseExpression = function (s, until) {
@@ -1074,6 +1073,7 @@ var SWUtils = SWUtils || (function() {
 		}
 		if (! exprStr) {
 			callback("");
+			return;
 		}
 		searchAndReplaceFields(exprStr, function(replacedStr) {
 			var evaluated;
