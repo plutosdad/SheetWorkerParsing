@@ -985,8 +985,9 @@ var ExExp = (function(){
 
 var SWUtils = SWUtils || (function() {	
 	
-	//no macro calls, dropdowns, or keep  highest/lowest more than 1
-	//currently support floor, abs, kh1, kl1 , also extended: ceil, round, max, min
+	/*no macro calls, dropdowns, or keep  highest/lowest more than 1
+	* currently support floor, abs, kh1, kl1 , also extended: ceil, round, max, min
+	*/
 	var validNumericStr = function(preeval) {
 		var anyIllegal=preeval.match(/\||\?|&|\{|\}|k[h,l][^1]/);
 		if (anyIllegal) {
@@ -1003,30 +1004,29 @@ var SWUtils = SWUtils || (function() {
 	
 	/* searchAndReplaceFields
 	 * Examines a string for instances of @{fieldname}, and then searches the sheet for those values 
-	 * then replaces the intances in the string with the values of those fields.
+	 * then replaces the instances in the string with the values of those fields.
 	 * Because it is a search and replace, if there are no @{fieldname} values, then it will return the same string back.
 	 * If there is an error, it will return an empty string "".
 	 *
 	 * @fromfield = string containing one or more @{fieldname}
 	 * @callback = method accepting 1 parameter , this parameter will be the result of the search and replace in the fromfield.
-	 * @ensureValidExpr = true if call validNumericStr 
 	 * the end result should be evaluable to a number (not a macro string that is sent to chat)
 	 *   e.g.: replaces  [[ and ]] with ( and ) , ensures only kl1 or kh1 (not kh2 or more etc),
 	 *         no strings except valid functions like floor, ceil, etc, according to validNumericStr
 	 */
-	searchAndReplaceFields = function(fromfield, ensureValidExpr, callback ) {
+	searchAndReplaceFields = function(fromfield, callback ) {
 		if (typeof callback !== "function") {
 			return;
 		}
 		if (! fromfield ) {
-			callback("");
+			callback(null);
 			return;
 		}
 		try {
 			var i,numfields,fieldnames=[],matches = [];
-			if (ensureValidExpr) {
-				fromfield = fromfield.replace("selected|","").replace("target|","");
-			}
+			fromfield = fromfield.split("selected|").join("");
+			fromfield = fromfield.split("target|").join("");
+
 			matches = fromfield.match(/(@\{([^}]+)\})(?!.*\1)/g);
 			if (!matches) {
 				callback (fromfield);
@@ -1050,23 +1050,16 @@ var SWUtils = SWUtils || (function() {
 						evalstr = evalstr.split(matches[i]).join(replacements[i]);
 
 					}
-					if (ensureValidExpr) {
-						evalstr=evalstr.replace(/\s+/g,'').replace(/\[\[/g,"(").replace(/\]\]/g,")");
-						if (! validNumericStr(evalstr) ) {
-							evalstr="";
-							console.log("ERROR: cannot evaluate this to number: " + fromfield);
-						}
-					}
 				} catch (err) {
 					console.log("ERROR:" + err);
-					evalstr="";
+					evalstr=null;
 				} finally {
 					callback ( evalstr);
 				}
 			});
 		} catch (err){
 			console.log("ERROR: " + err);
-			callback (fromfield);
+			callback (null);
 		} 
 	},
 
@@ -1082,16 +1075,16 @@ var SWUtils = SWUtils || (function() {
 		if (! exprStr) {
 			callback("");
 		}
-		searchAndReplaceFields(exprStr, true, function(replacedStr) {
-			//console.log("we received "+replacedStr+" back");
+		searchAndReplaceFields(exprStr, function(replacedStr) {
 			var evaluated;
-			// not simply !replacedStr since "0" is valid
-			if (typeof replacedStr !== "undefined" && replacedStr !== null ) {
+			replacedStr=replacedStr.replace(/\s+/g,'').replace(/\[\[/g,"(").replace(/\]\]/g,")");
+			if (typeof replacedStr !== "undefined" && replacedStr !== null && validNumericStr(replacedStr) ) {
 				evaluated = ExExp.handleExpression(replacedStr);
 				//console.log("sending back "+evaluated);
 				callback( evaluated);
 			} else {
-				callback("");
+				console.log("ERROR: cannot evaluate this to number: " + exprStr);
+				callback(null);
 			}
 		});	
 	},
@@ -1111,10 +1104,10 @@ var SWUtils = SWUtils || (function() {
 			return;
 		}
 		getAttrs([readField], ensureValidExpr,function(values) {
-			searchAndReplaceFields(values[readField], function(valueOf) {
-				if (typeof valueOf !== "undefined" && valueOf !== null ) {
-					var setter = {};
-					setter[writeField]=valueOf;
+			searchAndReplaceFields(values[readField], function(replacedStr) {
+				var setter = {};
+				if (typeof replacedStr !== "undefined" && replacedStr !== null ) {
+					setter[writeField]=replacedStr;
 					setAttrs(setter);
 				}
 			});
@@ -1131,37 +1124,38 @@ var SWUtils = SWUtils || (function() {
     *
 	* @readField {string}= field to read containing string to parse
 	* @writeField {string}= field to write to
-	* @dontForceZero {boolean}= if the writeField is empty, then leave it empty rather than set it to 0
+	* @dontForceOnBlank {boolean}= False (default): if writeField is empty overwrite no matter what,
+	*               True: if writeField empty, then write only if readField evaluates to other than defaultVal||0.
 	* @defaultVal {number}= optional, default to set if we cannot evaluate the field. If none set to 0.
 	* 
 	*/
-	evaluateAndSetNumber = function(readField,writeField,dontForceZero,defaultVal){
+	evaluateAndSetNumber = function(readField,writeField,dontForceOnBlank,defaultVal){
 		//console.log("EEEE at evaluateAndSetNumber read:"+readField+", write:"+writeField);
 		getAttrs([readField,writeField], function (values){ 
 			//console.log(values);
-			var o = {};
-
-			var currVal= parseFloat(values[writeField],10);
-			var value = parseFloat(values[readField],10);//cannot do "||0" since 0 is valid but falsy
-
-			var forceUpdate = isNaN(currVal) && !dontForceZero;
-			currVal=currVal||0;
-			if (!values[readField] ) { value=0;}
-			if  (isNaN(value) ) {
-				evaluateExpression(values[readField],function(value2){
-					//should be same, but sometimes not!? check both
-					if ( isNaN(value2) || typeof value2  === "undefined" ) {value2=defaultVal||0;}
-					if (forceUpdate || currVal!==value2) {
-						o[writeField]=value2;
-						setAttrs(o);					
-					}
-				});
-			} else {
-				if ( forceUpdate ||  currVal!==value) {
-					o[writeField]=value;
-					setAttrs(o);
-				}				
+			var setter = {},setAny=0,forceUpdate,
+				trueDefault = defaultVal||0,
+				currVal= parseFloat(values[writeField],10),
+				value = Number(values[readField]);
+			forceUpdate = isNaN(currVal) && !dontForceOnBlank;
+			currVal=currVal||trueDefault;
+			if (typeof values[readField] !== undefined && values[readField] !== null) {
+				if (!isNaN(value))  {
+					if ( forceUpdate ||  currVal!==value) {
+						setter[writeField]=value;
+						setAny=1;
+					}				
+				} else {
+					evaluateExpression(values[readField],function(value2){
+						value2=isNaN(value2)?trueDefault:value2;
+						if (forceUpdate || currVal!==value2) {
+							setter[writeField]=value2;
+							setAny=1;				
+						}
+					});
+				}  
 			}
+			if (setAny) {setAttrs(setter);}
 		});		
 	},
 
@@ -1201,11 +1195,14 @@ var SWUtils = SWUtils || (function() {
 	*/	
 	setNumberFieldToRepeating = function (repeatingSection,val,fieldToUpdatePartialName,postPend) {
 		getSectionIDs("repeating_"+repeatingSection,function(ids){
-			for (id of ids) {
+			ids.forEach(function(id,index){
 				//separate function per row necessary to clone params because outer variables change rapidly
-
 				updateRepeatingSectionNumberValue(repeatingSection,id,fieldToUpdatePartialName,val,postPend);
-			}
+			})
+			//for (id of ids) {
+				//separate function per row necessary to clone params because outer variables change rapidl
+			//	updateRepeatingSectionNumberValue(repeatingSection,id,fieldToUpdatePartialName,val,postPend);
+			//}
 		});
 	},
 
