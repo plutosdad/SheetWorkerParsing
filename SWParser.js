@@ -1,9 +1,7 @@
 
-var ExExp = (function(){
+var ExExp = ExExp|| (function(){
 
     parseExpression = function (s, until) {
-        //alert('parsing: ' + s);
-        //alert('until is ' + typeof until);
         var untilCb = (typeof (until) == typeof (function () {}) ? until : function (tok) {
             return (tok == until);
         });
@@ -443,7 +441,7 @@ var ExExp = (function(){
     },
 
     write= function (s) {
-    	console.log("EXEXP:"+s);
+        console.log("EXEXP:"+s);
     },
 
 
@@ -724,6 +722,8 @@ var ExExp = (function(){
                 delete t.cond;
                 delete t.left;
                 delete t.right;
+				
+				
                 for (var k in y) {
                     t[k] = y[k];
                 }
@@ -888,43 +888,46 @@ var ExExp = (function(){
         while (doSubstitution) {
             doSubstitution = false;
             // substitute in values for variables for which we already have names
-            for (var label in references) {
-                if (!labels[label]) {
-                    return reportError("Variable '" + label + "' not defined");
-                }
-                if ((labels[label].type != "string") && (labels[label].type != "number")) {
-                    // variable exists but not yet evaluated; try to evaluate
-                    var err = lazyEval(labels[label], labels, references, unevalRefs, evalReqs, true);
-                    if (typeof (err) == typeof ("")) {
-                        return reportError(err);
-                    }
-                }
-                if ((labels[label].type == "string") || (labels[label].type == "number")) {
-                    // variable fully evaluated; substitute it in
-                    for (var i = 0; i < references[label].length; i++) {
-                        references[label][i].type = labels[label].type;
-                        references[label][i].datatype = labels[label].datatype;
-                        references[label][i].value = labels[label].value;
-                        references[label][i].baseValid = labels[label].baseValid;
-                    }
-                    delete references[label];
-                    doSubstitution = true;
-                }
-            }
-            // try to get names for variables and tables with unevaluated names
-            var newUneval = [];
-            while (unevalRefs.length > 0) {
-                var r = lazyEval(unevalRefs.shift(), labels, references, unevalRefs, evalReqs, true);
-                if (typeof (r) == typeof ("")) {
-                    return reportError(err);
-                }
-                if ((r.type == "string") || (r.type == "number")) {
-                    doSubstitution = true;
-                } else {
-                    newUneval.push(r);
-                }
-            }
-            unevalRefs = newUneval;
+
+			for (var label in references) {
+				if (!labels[label]) {
+					return reportError("Variable '" + label + "' not defined");
+				}
+				if ((labels[label].type != "string") && (labels[label].type != "number")) {
+					// variable exists but not yet evaluated; try to evaluate
+					var err = lazyEval(labels[label], labels, references, unevalRefs, evalReqs, true);
+					if (typeof (err) == typeof ("")) {
+						return reportError(err);
+					}
+				}
+				if ((labels[label].type == "string") || (labels[label].type == "number")) {
+					// variable fully evaluated; substitute it in
+					for (var i = 0; i < references[label].length; i++) {
+						references[label][i].type = labels[label].type;
+						references[label][i].datatype = labels[label].datatype;
+						references[label][i].value = labels[label].value;
+						references[label][i].baseValid = labels[label].baseValid;
+					}
+					delete references[label];
+					doSubstitution = true;
+				}
+			}
+		
+			// try to get names for variables and tables with unevaluated names
+			var newUneval = [];
+			while (unevalRefs.length > 0) {
+				var r = lazyEval(unevalRefs.shift(), labels, references, unevalRefs, evalReqs, true);
+				if (typeof (r) == typeof ("")) {
+					return reportError(err);
+				}
+				if ((r.type == "string") || (r.type == "number")) {
+					doSubstitution = true;
+				} else {
+					newUneval.push(r);
+				}
+			}
+			unevalRefs = newUneval;
+			
         }
 
         // flatten fully evaluated ASTs into strings and splice into chunks
@@ -940,11 +943,11 @@ var ExExp = (function(){
 
         if (evalReqs.length > 0) {
 			Console.log("Cannot evalutate");
-			return ;
+			return "";
         }
         if (asts.length > 0) {
             // need to finish evaluating some ASTs; recurse directly
-            return ExExp.sendCommand(chunks, asts, [], labels)
+            return sendCommand(chunks, asts, [], labels)
         }
         // if we got here, we're done evaluating everything; submit results via sendChat
 		var retval=chunks.join("");
@@ -960,7 +963,7 @@ var ExExp = (function(){
         var state = {
             's': cmd
         };
-		var ast = ExExp.parseExpression(state, null);
+		var ast = parseExpression(state, null);
 		if (typeof (ast) == typeof ("")) {
 			ExExp.write("could not parse"+msg);
 			return "";
@@ -969,14 +972,12 @@ var ExExp = (function(){
 		state.s =  (state.tok)?(state.tok.text+state.s):state.s;
           //  ((state.tok || {'text': ""}).text || "") + state.s;
         chunks.push(state.s);
-        return ExExp.sendCommand(chunks, asts, [], {});
+        return sendCommand(chunks, asts, [], {});
     };
-
+	
 	
     return {
-		parseExpression:parseExpression,
 		write:write,
-		sendCommand:sendCommand,
 		handleExpression:handleExpression
     };
 }());
@@ -984,17 +985,18 @@ var ExExp = (function(){
 
 var SWUtils = SWUtils || (function() {	
 	
-	//no macro calls, dropdowns, or keep  highest/lowest more than 1
-	//currently support floor, abs, kh1, kl1 , also extended: ceil, round, max, min
+	/*no macro calls, dropdowns, or keep  highest/lowest more than 1
+	* currently support floor, abs, kh1, kl1 , also extended: ceil, round, max, min
+	*/
 	var validNumericStr = function(preeval) {
-		var anyillegal=preeval.match(/\||\?|&|\{|\}|k[h,l][^1]/);
-		if (!(anyillegal==undefined) && anyillegal.length>0) {
+		var anyIllegal=preeval.match(/\||\?|&|\{|\}|k[h,l][^1]/);
+		if (anyIllegal) {
 			return false;
 		}
 		
 		var r2=preeval.replace(/floor|ceil|round|abs|max|min|kh1|kl1/g,'');
-		anyillegal = r2.match(/[a-zA-Z]/);
-		if (!(anyillegal==undefined) && anyillegal.length>0) {
+		anyIllegal = r2.match(/[a-zA-Z]/);
+		if (anyIllegal) {
 			return false;
 		}
 		return true;
@@ -1002,32 +1004,31 @@ var SWUtils = SWUtils || (function() {
 	
 	/* searchAndReplaceFields
 	 * Examines a string for instances of @{fieldname}, and then searches the sheet for those values 
-	 * then replaces the intances in the string with the values of those fields.
+	 * then replaces the instances in the string with the values of those fields.
 	 * Because it is a search and replace, if there are no @{fieldname} values, then it will return the same string back.
 	 * If there is an error, it will return an empty string "".
 	 *
 	 * @fromfield = string containing one or more @{fieldname}
 	 * @callback = method accepting 1 parameter , this parameter will be the result of the search and replace in the fromfield.
-	 * @evalToNumber = true if call validNumericStr 
 	 * the end result should be evaluable to a number (not a macro string that is sent to chat)
 	 *   e.g.: replaces  [[ and ]] with ( and ) , ensures only kl1 or kh1 (not kh2 or more etc),
 	 *         no strings except valid functions like floor, ceil, etc, according to validNumericStr
 	 */
-	searchAndReplaceFields = function(fromfield, evalToNumber, callback ) {
+	searchAndReplaceFields = function(fromfield, callback ) {
 		if (typeof callback !== "function") {
 			return;
 		}
 		if (! fromfield ) {
-			callback("");
+			callback(null);
 			return;
 		}
 		try {
 			var i,numfields,fieldnames=[],matches = [];
-			if (evalToNumber) {
-				fromfield = fromfield.replace("selected|","").replace("target|","");
-			}
+			fromfield = fromfield.split("selected|").join("");
+			fromfield = fromfield.split("target|").join("");
+
 			matches = fromfield.match(/(@\{([^}]+)\})(?!.*\1)/g);
-			if (typeof matches == "undefined" || matches==null) {
+			if (!matches) {
 				callback (fromfield);
 				return;
 			}
@@ -1049,23 +1050,16 @@ var SWUtils = SWUtils || (function() {
 						evalstr = evalstr.split(matches[i]).join(replacements[i]);
 
 					}
-					if (evalToNumber) {
-						evalstr=evalstr.replace(/\s+/g,'').replace(/\[\[/g,"(").replace(/\]\]/g,")");
-						if (! validNumericStr(evalstr) ) {
-							evalstr="";
-							console.log("ERROR: cannot evaluate this to number: " + fromfield);
-						}
-					}
 				} catch (err) {
 					console.log("ERROR:" + err);
-					evalstr="";
+					evalstr=null;
 				} finally {
 					callback ( evalstr);
 				}
 			});
 		} catch (err){
 			console.log("ERROR: " + err);
-			callback (fromfield);
+			callback (null);
 		} 
 	},
 
@@ -1081,45 +1075,47 @@ var SWUtils = SWUtils || (function() {
 		if (! exprStr) {
 			callback("");
 		}
-		searchAndReplaceFields(exprStr, true, function(replacedStr) {
-			//console.log("we received "+replacedStr+" back");
-			var evaluated, setter={};
-			if (typeof replacedStr != "undefined" && replacedStr != null ) {
+		searchAndReplaceFields(exprStr, function(replacedStr) {
+			var evaluated;
+			console.log("search and replace of " + exprStr +" resulted in " + replacedStr);
+			replacedStr=replacedStr.replace(/\s+/g,'').replace(/\[\[/g,"(").replace(/\]\]/g,")");
+			if (typeof replacedStr !== "undefined" && replacedStr !== null && validNumericStr(replacedStr) ) {
 				evaluated = ExExp.handleExpression(replacedStr);
+				console.log("sending back "+evaluated);
 				callback( evaluated);
 			} else {
-				callback("");
+				console.log("ERROR: cannot evaluate this to number: " + exprStr);
+				callback(null);
 			}
 		});	
 	},
 
 
-	/* evaluateAndSet
+	/* evaluateAndSetString
 	 * Searches the readField for any instances of @{field} and replaces them with a value
 	 * then writes the resulting string to the writeField. 
 	 * 
 	 * @readField = the field that contains the string to evaluate, like a field containing a macro
 	 * @writeField = the field to write the evaluated value of readField to
+	 * @ensureValidExpr = the field should POTENTIALLY be evalauable to a number, it does not have to finish the evaluation, only make sure
+	 *   the field value is a valid numeric expression.
 	*/
-	evaluateAndSetString = function (readField,writeField,evalToNumber) {
-		if (typeof writeField === "undefined" || writeField == null || 
-			typeof readField === "undefined" || readField == null) {
+	evaluateAndSetString = function (readField,writeField,ensureValidExpr) {
+		if (!writeField || !readField) {
 			return;
 		}
-		getAttrs([readField], evalToNumber,function(values) {
-			searchAndReplaceFields(values[readField], function(valueOf) {
-				if (typeof valueOf != "undefined" && valueOf != null && valueOf.length > 0) {
-					var setter = {};
-					setter[writeField]=valueOf;
+		getAttrs([readField], ensureValidExpr,function(values) {
+			searchAndReplaceFields(values[readField], function(replacedStr) {
+				var setter = {};
+				if (typeof replacedStr !== "undefined" && replacedStr !== null ) {
+					setter[writeField]=replacedStr;
 					setAttrs(setter);
 				}
 			});
 		});
 	},
 	
-
-
-	/* evaluateToNumberAndSet
+	/* evaluateAndSetNumber
 	* Examines the string in readField, and tests to see if it is a number
 	* if it's a number immediately write it to writeField.
 	* if not, then replace any @{field} references with numbers, and then evaluate it 
@@ -1127,44 +1123,126 @@ var SWUtils = SWUtils || (function() {
 	*
 	* note this is NOT recursive, you can't point one field of 
     *
-	* @readField = field to read containing string to parse
-	* @writeField = field to write to
-	* @defaultVal= optional, default to set if we cannot evaluate the field. If none set to 0.
+	* @readField {string}= field to read containing string to parse
+	* @writeField {string}= field to write to
+	* @dontForceOnBlank {boolean}= False (default): if writeField is empty overwrite no matter what,
+	*               True: if writeField empty, then write only if readField evaluates to other than defaultVal||0.
+	* @defaultVal {number}= optional, default to set if we cannot evaluate the field. If none set to 0.
 	* 
 	*/
-	evaluateAndSetNumber = function(readField,writeField,defaultVal){
+	evaluateAndSetNumber = function(readField,writeField,dontForceOnBlank,defaultVal){
+		console.log("EEEE at evaluateAndSetNumber read:"+readField+", write:"+writeField+", dontforce:"+dontForceOnBlank+", default:"+defaultVal);
 		getAttrs([readField,writeField], function (values){ 
-			var o = {};
-			var value = 0;
-			var currVal= parseFloat(values[writeField],10)||0;
-			value = parseFloat(values[readField]);//cannot do "||0" since 0 is valid but falsy
-			if (isNaN(value) || typeof(value) === "undefined") {
-				SWUtils.evaluateExpression(values[readField],function(value){
-					//should be same, but sometimes not!? check both
-					if ( isNaN(value) || typeof(value) === "undefined" ) {value=defaultVal||0;}
-					if (currVal!==value) {
-						o[writeField]=value;
-						setAttrs(o);					
+			console.log(values);
+			var setter = {},forceUpdate,
+				trueDefault = defaultVal||0,
+				currVal= parseFloat(values[writeField],10),
+				value = Number(values[readField]);
+			console.log("trueDefault:"+trueDefault+", currVal:"+currVal+", value:"+value+", isNaN:"+isNaN(currVal));
+			//for buff grid if empty it is undefined, not sure why
+			
+			if (typeof values[readField] === "undefined" || values[readField]==="" ){
+				value=trueDefault;
+				console.log("PFSHeet Warning: could not find readField "+ readField + " at evaluateAndSetNumber");
+			}
+			forceUpdate = isNaN(currVal) && !dontForceOnBlank;
+			currVal=isNaN(currVal)?trueDefault:currVal;
+
+			if (!isNaN(value))  {
+				console.log("it was a number");
+				if ( forceUpdate ||  currVal!==value) {
+					setter[writeField]=value;
+					setAttrs(setter);
+				}				
+			} else {
+				console.log("ok evaluate "+values[readField]);
+				evaluateExpression(values[readField],function(value2){
+					console.log("came back with "+value2);
+					value2=isNaN(value2)?trueDefault:value2;
+					if (forceUpdate || currVal!==value2) {
+						setter[writeField]=value2;
+						setAttrs(setter);
 					}
 				});
-			} else {
-				if (currVal!==value) {
-					o[writeField]=value;
-					setAttrs(o);
-				}				
-			}
+			}  
+			
 		});		
-	};
+	},
+
+
+   /*updateRepeatingSectionNumberValue
+	* updates a single number field in a row for a single repeating section
+	* generates the field name from the section name, id of row, partial name, and postpended string if one is provided.
+	* the name will be :   repeating_<repeatingSection>_<id>_<fieldToUpdatePartialName><postPend>
+    *
+	* @repeatingSection = sectioname without "repeating_"
+	* @id = the id of the row , can be the id from getSectionIDs, should also work with $X the 
+	* @fieldToUpdatePartialName = the partial name (everything after repeating_<name>_$X_   except a postpended string )
+	*       if this is null, then use the copyFromField
+	* @postPend = a postpend string at the end of the fieldname in the repeating section , such as "-copy"
+	*/
+	updateRepeatingSectionNumberValue=function(repeatingSection,id,fieldToUpdatePartialName,newVal,postPend) {
+		var fieldToUpdate= "repeating_" + repeatingSection + "_"+id+"_" + fieldToUpdatePartialName + postPend;
+		getAttrs([fieldToUpdate],function(values){
+			var setter={}, 
+			val = parseInt(values[fieldToUpdate],10)||0;
+			if (newVal !== val ) {
+				setter[fieldToUpdate]=newVal; 
+				setAttrs(setter);
+			}
+		});
+	},	
 
 	
+   /* setNumberFieldToRepeating
+	* Sets a number to a field for all rows of a repeating section
+	* 
+	* @repeatingSection = sectioname without "repeating_"
+	* @val = number value to set
+	* @fieldToUpdatePartialName = the partial name (everything after repeating_<name>_$X_   except a postpended string )
+	*       if this is null, then use the copyFromField (if you set the name to be the same with a postpended string at the end)
+	* @postPend = a postpend string at the end of the fieldname in the repeating section , such as "-copy"
+	*/	
+	setNumberFieldToRepeating = function (repeatingSection,val,fieldToUpdatePartialName,postPend) {
+		getSectionIDs("repeating_"+repeatingSection,function(ids){
+			ids.forEach(function(id,index){
+				//separate function per row necessary to clone params because outer variables change rapidly
+				updateRepeatingSectionNumberValue(repeatingSection,id,fieldToUpdatePartialName,val,postPend);
+			});
+		});
+	},
+
+   /* copyStaticNumberFieldToRepeating
+	* Copies a number from a field outside a repeating section to the fields inside a repeating section
+	* For instance, if you have a field @{FOO} and when it is updated you want to update all field in
+	* the repeating_bar section, and they are named repeating_bar_$X_foo_copy
+	*   then you would call with parameters ("bar","foo","foo","_copy")
+	*
+	* @repeatingSection = sectioname without "repeating_"
+	* @copyFromField = Field to copy from
+	* @fieldToUpdatePartialName = the partial name (everything after repeating_<name>_$X_   except a postpended string )
+	*       if this is null, then use the copyFromField (if you set the name to be the same with a postpended string at the end)
+	* @postPend = a postpend string at the end of the fieldname in the repeating section , such as "-copy"
+	*/
+	copyStaticNumberFieldToRepeating = function (repeatingSection,copyFromField,fieldToUpdatePartialName,postPend) {
+		if (!fieldToUpdatePartialName ) {fieldToUpdatePartialName = copyFromField;}
+		getAttrs([copyFromField],function(attrs){
+			var copyFromFieldVal = parseInt(attrs[copyFromField],10)||0;
+			setNumberFieldToRepeating(repeatingSection,copyFromFieldVal,fieldToUpdatePartialName,postPend);
+		});
+	};
 	
     return {
-		validNumericStr:validNumericStr,
-		searchAndReplaceFields:searchAndReplaceFields,
-		evaluateExpression:evaluateExpression,
-		evaluateAndSetString:evaluateAndSetString,
-		evaluateAndSetNumber:evaluateAndSetNumber
+		 util:{  validNumericStr:validNumericStr
+
+				} 
+		,searchAndReplaceFields:searchAndReplaceFields
+		,evaluateExpression:evaluateExpression
+		,evaluateAndSetString:evaluateAndSetString
+		,evaluateAndSetNumber:evaluateAndSetNumber
+		,updateRepeatingSectionNumberValue:updateRepeatingSectionNumberValue
+		,copyStaticNumberFieldToRepeating:copyStaticNumberFieldToRepeating
+		,setNumberFieldToRepeating:setNumberFieldToRepeating
     };
 }());
-	
 	
