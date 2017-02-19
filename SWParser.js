@@ -1021,7 +1021,8 @@ var SWUtils = SWUtils || (function () {
 	* @param {string} stringToSearch = string containing one or more @{fieldname}
 	* @param {function(string)} callback when done passes resultant string to callback
 	*/
-	searchAndReplaceFields = function (stringToSearch, callback) {
+	findAndReplaceFields = function (stringToSearch, callback) {
+		var fieldnames ;
 		if (typeof callback !== "function") {
 			return;
 		}
@@ -1030,55 +1031,40 @@ var SWUtils = SWUtils || (function () {
 			return;
 		}
 		try {
-			var i,
-			numfields,
-			fieldnames = [],
-			matches = [];
 			stringToSearch = stringToSearch.split("selected|").join("");
 			stringToSearch = stringToSearch.split("target|").join("");
-			matches = stringToSearch.match(/(@\{([^}]+)\})(?!.*\1)/g);
-			if (!matches) {
+			fieldnames = stringToSearch.match(/\@\{[^}]+\}/g);
+			if (!fieldnames) {
 				callback(stringToSearch);
 				return;
 			}
-			numfields = matches.length;
-			fieldnames = [numfields];
-			for (i = 0; i < numfields; i++) {
-				fieldnames[i] = matches[i].replace("@{", "").replace("}", "");
-			}
-			//TAS.debug("fieldnames=" + fieldnames + ", numfields=" + numfields);
+			fieldnames=fieldnames.sort();
+			fieldnames = _.uniq(fieldnames,true);
+			fieldnames = _.map(fieldnames,function(field){
+				return field.slice(2,-1);
+			});
 			getAttrs(fieldnames, function (values) {
-				var evalstr = stringToSearch,
-				replacements = [numfields],
-				initialsplit;
+				var evalstr = stringToSearch, innermatches=null,initialsplit;
 				try {
-					for (i = 0; i < numfields; i++) {
-						//invalid field
-						if (typeof values[fieldnames[i]] === 'undefined'){
-							callback(null);
-							return;
-						}
-						replacements[i] = values[fieldnames[i]];
-					}
-					for (i = 0; i < numfields; i++) {
-						//easier than escaping special regex and double escaping $ just split and join less buggy
-						//if there is anything else in the string, put parenthesis around it.
-						initialsplit = evalstr.split(matches[i]);
-						if (initialsplit.length === 2 && !initialsplit[0] && !initialsplit[1]) {
-							evalstr = initialsplit.join(replacements[i]);
-						} else {
-							evalstr = initialsplit.join("(" + replacements[i] + ")");
-						}
-					}
+					_.each(fieldnames,function(field){
+						//evalstr = evalstr.replace(  new RegExp(escapeForRegExp('@{'+field+'}'),'g'), values[field]);
+						initialsplit = evalstr.split('@{'+field+'}');
+						evalstr = initialsplit.join(values[field]);
+					});
+					innermatches=evalstr.match(/\@\{[^}]+\}/g);
 				} catch (err2) {
-					TAS.error("searchAndReplaceFields", err2);
+					TAS.error("findAndReplaceFields", err2);
 					evalstr = null;
 				} finally {
-					callback(evalstr);
+					if (innermatches) {
+						findAndReplaceFields(evalstr,callback);
+					} else {
+						callback(evalstr);
+					}
 				}
 			});
 		} catch (err) {
-			TAS.error("searchAndReplaceFields", err);
+			TAS.error("findAndReplaceFields", err);
 			callback(null);
 		}
 	},
@@ -1133,7 +1119,7 @@ var SWUtils = SWUtils || (function () {
 			return;
 		}
 
-		searchAndReplaceFields(exprStr, function (replacedStr) {
+		findAndReplaceFields(exprStr, function (replacedStr) {
 			var evaluated,
 			newexprStr;
 			//TAS.debug("search and replace of " + exprStr + " resulted in " + replacedStr);
@@ -1160,11 +1146,11 @@ var SWUtils = SWUtils || (function () {
 					if (!isNaN(evaluated)) {
 						callback(evaluated);
 					} else {
-						TAS.warn("cannot evaluate this to number: " + exprStr);
+						TAS.warn("cannot evaluate this to number: " + exprStr +" came back with " + replacedStr);
 						callback(null);
 					}
 				} else {
-					TAS.warn("cannot evaluate this to number: " + exprStr);
+					TAS.warn("cannot evaluate this to number: " + exprStr+" came back with " + replacedStr);
 					callback(null);
 				}
 			} catch (err3) {
@@ -1186,13 +1172,12 @@ var SWUtils = SWUtils || (function () {
 	 * @param {number} defaultVal= optional, default to set if we cannot evaluate the field. If not supplied assume 0
 	 * @param {function} callback - function(newval, oldval, ischanged)
 	 * @param {bool} silently if true set new val with {silent:true}
-	 * @param {bool} setErrorFlag if true and we could not evaluate, then set attribute named writeField+"_error" to 1
+	 * @param {bool} dontSetErrorFlag if true and we could not evaluate, then set attribute named writeField+"_error" to 1
 	 * @param {function} errcallback  call if there was an error parsing string function(newval, oldval, ischanged)
 	 */
-	evaluateAndSetNumber = function (readField, writeField, defaultVal, callback, silently, setErrorFlag, errcallback) {
-		var currError=0,
-		isError=0,
-		done = function (a, b, c) {
+	evaluateAndSetNumber = function (readField, writeField, defaultVal, callback, silently, errcallback) {
+		var 
+		done = function (a, b, c,currError) {
 			var donesetter={};
 			if (currError){
 				donesetter[writeField+'_error']=0;
@@ -1202,11 +1187,12 @@ var SWUtils = SWUtils || (function () {
 				callback(a, b, c);
 			}
 		},
-		errordone = function(a,b,c){
+		errordone = function(a,b,c,currError){
 			var donesetter={};
-			if (setErrorFlag && !currError){
+			//TAS.debug("leaving set of "+ writeField+" with old:"+b+", new:"+c+" is changed:"+ c+" and curreerror:"+currError);
+			if (!currError){
 				donesetter[writeField+'_error']=1;
-				setAttrs(donesetter,{silent:true});
+				setAttrs(donesetter,{silent:true});				
 			}
 			if (typeof errcallback === "function") {
 				errcallback(a, b, c);
@@ -1219,9 +1205,12 @@ var SWUtils = SWUtils || (function () {
 			params = {},
 			trueDefault=0, 
 			currVal=0,
+			isError=0,
+			currError=0,
 			isChanged=false,
 			value=0;	
 			try {
+				if (silently){params.silent=true;}
 				currError= parseInt(values[writeField+"_error"],10)||0;
 				trueDefault = defaultVal || 0;
 				currVal = parseInt(values[writeField], 10);
@@ -1233,10 +1222,10 @@ var SWUtils = SWUtils || (function () {
 					if (currVal !== value || isNaN(currVal)) {
 						setter[writeField] = value;
 						setAttrs(setter, params, function () {
-							done(value, currVal, true);
+							done(value, currVal, true,currError);
 						});
 					} else {
-						done(value, currVal, false);
+						done(value, currVal, false,currError);
 					}
 				} else if (!isNaN(value)) {
 					//check for number
@@ -1246,7 +1235,7 @@ var SWUtils = SWUtils || (function () {
 							done(value, currVal, true);
 						});
 					} else {
-						done(value, currVal, false);
+						done(value, currVal, false,currError);
 					}
 				} else {
 					//pass to evaluateExpression 
@@ -1255,6 +1244,7 @@ var SWUtils = SWUtils || (function () {
 							if (value2 === null || value2===undefined || isNaN(value2)) {
 								isError=1;
 								value2=trueDefault;
+								//TAS.debug("setting "+ writeField+" to " +value2);
 							}
 							if (isNaN(currVal) || currVal !== value2) {
 								setter[writeField] = value2;
@@ -1268,9 +1258,9 @@ var SWUtils = SWUtils || (function () {
 						} finally {
 							setAttrs(setter, params, function () {
 								if (!isError){
-									done(value2, currVal, isChanged);
+									done(value2, currVal, isChanged,currError);
 								} else {
-									errordone(value2,currVal,isChanged);
+									errordone(value2,currVal,isChanged,currError);
 								}
 							});
 
@@ -1280,7 +1270,7 @@ var SWUtils = SWUtils || (function () {
 			} catch (err) {
 				TAS.error("SWUtils.evaluateAndSetNumber", err);
 				setter[writeField+'_error']=1;
-				setAttrs(setter,{silent:true},function(){errordone(value, currVal, false);});
+				setAttrs(setter,{silent:true},function(){errordone(value, currVal, false,currError);});
 			}
 		});
 	},
@@ -1500,16 +1490,14 @@ var SWUtils = SWUtils || (function () {
 		}
 		return "";
 	},
-	/** Escapes special chars for rolltemplates 
+	/** Escapes '{{' for passing to a rolltemplate
 	*@param {string} str the string to examine
 	*@returns {string} resultant string after search and replace
 	*/
 	escapeForRollTemplate = function (str) {
 		if (!str){return str;}
-		return str.replace(/\{\{/g, '&#123;&#123;').replace(/\}\}/g, '&#125;&#125;');
+		return str.replace(/\{\{/g, '&#123;&#123;');
 	},
-
-	
 	/** escapes string so it can be used in the name section of another link button
 	*if it finds [name](link) in a string it will remove the [ and ] and the (link)
 	* replaces [ and ] with escaped versions everywhere else.
@@ -1557,8 +1545,18 @@ var SWUtils = SWUtils || (function () {
 		}
 		return attrib;
 	},
-
-
+	/** getRepeatingIDStr - if id is not empty, then returns the ID with an underscore on the right. else returns empty string
+	* this is used so the same function can be written for loops from getIDs or direct from the event with no ID
+	*@param {string} id the id of the row or blank
+	*@returns {string} id_  or blank
+	*/
+	getRepeatingIDStr = function (id) {
+		var idStr = "";
+		if (!(id === null || id === undefined)) {
+			idStr = id + "_";
+		}
+		return idStr;
+	},
 	/** Append values of multiple arrays of strings together to return one NEW array of strings that is the cartesian product.
 	* @example cartesianAppend(["a","b"],["c","d"], ["e","f"]);
 	* // returns ["ace","acf","ade","adf","bce","bcf","bde","bdf"]
@@ -1612,7 +1610,8 @@ var SWUtils = SWUtils || (function () {
 		convertKL1KH1toMinMax: convertKL1KH1toMinMax,
 		escapeForRegExp: escapeForRegExp,
 		escapeForRollTemplate: escapeForRollTemplate,
-		searchAndReplaceFields: searchAndReplaceFields,
+		searchAndReplaceFields: findAndReplaceFields,
+		findAndReplaceFields: findAndReplaceFields,
 		evaluateExpression: evaluateExpression,
 		getRowId: getRowId,
 		getAttributeName: getAttributeName,
@@ -1622,6 +1621,7 @@ var SWUtils = SWUtils || (function () {
 		setDropdownValue: setDropdownValue,
 		getRowTotal: getRowTotal,
 		updateRowTotal: updateRowTotal,
+		getRepeatingIDStr: getRepeatingIDStr,
 		validNumericStr: validNumericStr,
 		trimBoth: trimBoth
 	};
